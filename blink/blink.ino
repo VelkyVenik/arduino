@@ -1,5 +1,6 @@
 
-#define ledsCount  5
+#define ledsCount 5
+#define playLeds(n) _playLeds (n, sizeof(n)/sizeof(int)/ledsCount)
 
 const int firstLed = 2;
 
@@ -72,10 +73,6 @@ const int leds5[][ledsCount] = {
 };
 
 
-
-
-boolean next = false;
-
 void setup() {
   for (int i = firstLed; i < firstLed + ledsCount; i++) {
     pinMode(i, OUTPUT);
@@ -101,7 +98,7 @@ void setLeds(const int leds[]) {
 
 }
 
-void playLeds(const int leds[][ledsCount], int len) {
+void _playLeds(const int leds[][5], int len) {
   for (int i = 0; i < len; i++) {
     setLeds (leds[i]);
     if (checkButton()) return;
@@ -133,19 +130,19 @@ void loop() {
     
   switch (s) {
     case 0:
-      playLeds (leds1, sizeof(leds1)/sizeof(int)/ledsCount);
+      playLeds (leds1);
     break;
     case 1:
-      playLeds (leds2, sizeof(leds2)/sizeof(int)/ledsCount);
+      playLeds (leds2);
     break;
     case 2:
-      playLeds (leds3, sizeof(leds3)/sizeof(int)/ledsCount);
+      playLeds (leds3);
     break;
     case 3:
-      playLeds (leds4, sizeof(leds4)/sizeof(int)/ledsCount);
+      playLeds (leds4);
     break;
     case 4:
-      playLeds (leds5, sizeof(leds5)/sizeof(int)/ledsCount);
+      playLeds (leds5);
     break;
   }
 }

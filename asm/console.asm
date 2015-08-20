@@ -38,7 +38,8 @@ main_loop:
     clr rx_ready            ;indicate no more byte
 
     lds data,rx_byte         ;get the byte
-    rcall USART_TX
+    rcall usart_tx
+    rcall usart_nl
 
     ldi temp, 'x'
     cp data, temp
@@ -62,7 +63,6 @@ cmd_input:
     ldi ZL, low(s_input * 2)
     ldi ZH, high(s_input * 2)
     rcall usart_write
-
     ret
 
 
@@ -71,11 +71,14 @@ cmd_x:
     ldi ZL, low(s_cmd_x * 2)
     ldi ZH, high(s_cmd_x * 2)
     rcall usart_write
+    rcall usart_nl
     ret
+
 cmd_v:
     ldi ZL, low(s_cmd_v * 2)
     ldi ZH, high(s_cmd_v * 2)
     rcall usart_write
+    rcall usart_nl
     ret
 
 
@@ -148,7 +151,7 @@ rx_store:               ;store received byte
     pop r16             ;retrieve r16 from stack
     reti
 
-usart_tx:
+usart_tx:               ; wait for empty buffer and then send data
     lds     temp, UCSR0A
     sbrs    temp, UDRE0  
     rjmp    USART_TX
@@ -169,7 +172,7 @@ usart_init:
     ret
 
 
-usart_write:
+usart_write:            ; send data located on address stored in Z register
 
 write_loop:
     lpm data, Z+
@@ -183,12 +186,25 @@ write_loop:
 write_finish:
     ret
 
+usart_nl:               ; send new line
+    push data
+
+    ldi data, 0x0d
+    rcall usart_tx
+    ldi data, 0x0a
+    rcall usart_tx
+    
+    pop data
+
+    ret
+
+
 
 
 ;-----------------------------------------------------------------
 ;--------------------- DATA --------------------------------------
 ;-----------------------------------------------------------------
 
-s_input:        .db ">> \r\n", 0
+s_input:        .db ">> ", 0
 s_cmd_x:        .db "Exit.....", 0
 s_cmd_v:        .db "Console Demo :)", 0

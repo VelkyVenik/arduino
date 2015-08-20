@@ -1,0 +1,7 @@
+*.o
+*.exe
+*.obj
+*.hex
+*.cof
+*.lst
+.DS_Store

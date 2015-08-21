@@ -42,26 +42,22 @@ main_loop:
 
     clr rx_ready            ;indicate no more byte
 
+    ; load command
     lds data,rx_byte         ;get the byte
     rcall usart_tx
     rcall usart_nl
 
-    ldi temp, 'x'
-    cp data, temp
-    brne PC+2
-    rcall cmd_x
-
-    ldi temp, 'v'
-    cp data, temp
-    brne PC+2
-    rcall cmd_v
+    ; execute command
+    rcall cmd_run
 
     rcall led_debug
-
     rcall cmd_input
 
     jmp main_loop
 
+;-----------------------------------------------------------------
+;--------------------- Commands ----------------------------------
+;-----------------------------------------------------------------
 
 cmd_input:
     ; print input message
@@ -70,20 +66,40 @@ cmd_input:
     ret
 
 
+cmd_run:
+    cpi data, 'x'
+    breq cmd_x
+
+    cpi data, 'v'
+    breq cmd_v
+
+    cpi data, 'h'
+    breq cmd_h
+
+    ;default
+    ldidb s_cmd_unknown
+    rcall usart_writeln
+
+cmd_run_end:
+    ret
 
 cmd_x:
     ldidb s_cmd_x
-    rcall usart_write
-    rcall usart_nl
-    ret
+    rcall usart_writeln
+    ; disable UART interface
+    clr temp
+    sts UCSR0B,temp
+    rjmp cmd_run_end
 
 cmd_v:
     ldidb s_cmd_v
-    rcall usart_write
-    rcall usart_nl
-    ret
+    rcall usart_writeln
+    rjmp cmd_run_end
 
-
+cmd_h:
+    ldidb s_cmd_h
+    rcall usart_writeln
+    rjmp cmd_run_end
 
 
 ;-----------------------------------------------------------------
@@ -200,6 +216,11 @@ usart_nl:               ; send new line
 
     ret
 
+usart_writeln:
+    rcall usart_write
+    rcall usart_nl
+    ret
+
 
 
 
@@ -209,4 +230,6 @@ usart_nl:               ; send new line
 
 s_input:        .db ">> ", 0
 s_cmd_x:        .db "Exit.....", 0
-s_cmd_v:        .db "Console Demo :)", 0
+s_cmd_v:        .db "Console Demo :)", 0x0d, 0x0a, "build %YEAR%%MONTH%%DAY%%HOUR%%MINUTE%", 0
+s_cmd_h:        .db "Help:", 0x0d, 0x0a, " h - this help", 0x0d, 0x0a, " v - program version", 0x0d, 0x0a, " x - exit console", 0
+s_cmd_unknown:  .db "Unknown command, enter h for help", 0

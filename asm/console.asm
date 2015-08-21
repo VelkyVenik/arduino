@@ -18,12 +18,17 @@ rx_byte:    .byte   1
 .ORG 0x0024
     jmp usart_rxc_isr ; 19 USART Rx Complete
 
-main:   
+.macro ldidb            ; load .db address into Z register
+ldi ZL, low(@0 * 2)
+ldi ZH, high(@0 * 2)
+.endmacro
+
+main:
     ldi temp,low(RAMEND)     ;stack init
     out SPL,temp
     ldi temp,high(RAMEND)
     out SPH,temp
-  
+
     rcall led_init
     rcall usart_init
 
@@ -60,23 +65,20 @@ main_loop:
 
 cmd_input:
     ; print input message
-    ldi ZL, low(s_input * 2)
-    ldi ZH, high(s_input * 2)
+    ldidb s_input
     rcall usart_write
     ret
 
 
 
 cmd_x:
-    ldi ZL, low(s_cmd_x * 2)
-    ldi ZH, high(s_cmd_x * 2)
+    ldidb s_cmd_x
     rcall usart_write
     rcall usart_nl
     ret
 
 cmd_v:
-    ldi ZL, low(s_cmd_v * 2)
-    ldi ZH, high(s_cmd_v * 2)
+    ldidb s_cmd_v
     rcall usart_write
     rcall usart_nl
     ret
@@ -102,7 +104,7 @@ led_init:
 led_debug:
     push r20
 
-    mov r20, led 
+    mov r20, led
     lsl r20
     lsl r20
     out PORTD, r20
@@ -115,7 +117,7 @@ led_debug:
     lsr r20
     lsr r20
     out PORTB, r20
-    
+
     lsl led
     brcc PC+2
     ldi led, 0b00000001
@@ -135,7 +137,7 @@ usart_rxc_isr:
 
     tst rx_ready        ;byte already received?
     breq rx_store       ;not received (0x00, Z=1). store this one
-    
+
     pop r16             ;retrieve SREG from stack
     out SREG,r16
     pop r16             ;retrieve r16 from stack
@@ -153,7 +155,7 @@ rx_store:               ;store received byte
 
 usart_tx:               ; wait for empty buffer and then send data
     lds     temp, UCSR0A
-    sbrs    temp, UDRE0  
+    sbrs    temp, UDRE0
     rjmp    USART_TX
     sts     UDR0, data
     ret
@@ -193,7 +195,7 @@ usart_nl:               ; send new line
     rcall usart_tx
     ldi data, 0x0a
     rcall usart_tx
-    
+
     pop data
 
     ret

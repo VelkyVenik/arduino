@@ -50,7 +50,7 @@ main_loop:
     ; execute command
     rcall cmd_run
 
-    rcall led_debug
+    ;rcall led_debug
     rcall cmd_input
 
     jmp main_loop
@@ -76,6 +76,9 @@ cmd_run:
     cpi data, 'h'
     breq cmd_h
 
+    cpi data, 'l'
+    breq cmd_l
+
     ;default
     ldidb s_cmd_unknown
     rcall usart_writeln
@@ -97,9 +100,31 @@ cmd_v:
     rjmp cmd_run_end
 
 cmd_h:
-    ldidb s_cmd_h
+    ldidb s_cmd_h_1
+    rcall usart_writeln
+    ldidb s_cmd_h_2
     rcall usart_writeln
     rjmp cmd_run_end
+
+cmd_l:
+    ldidb s_cmd_l
+    rcall usart_write
+
+cmd_l_loop:
+    tst rx_ready            ;byte stored?
+    breq cmd_l_loop          ;no (Z=1). Loop
+
+    clr rx_ready            ;indicate no more byte
+
+    ; load and print number
+    lds data,rx_byte         ;get the byte
+    rcall usart_tx
+    rcall usart_nl
+
+    rcall led_on
+
+    rjmp cmd_run_end
+
 
 
 ;-----------------------------------------------------------------
@@ -141,6 +166,28 @@ led_debug:
     pop r20
 
     ret
+
+led_on:
+    clr temp
+    cpi data, '0'
+    breq led_done
+
+    cpi data, '7'
+    brsh led_done
+
+led_on_loop:
+    dec data
+    sec
+    rol temp
+    cpi data, '0'
+    brne led_on_loop
+
+led_done:
+    lsl temp
+    lsl temp
+    out PORTD, temp
+    ret
+    
 
 ;-----------------------------------------------------------------
 ;--------------------- USART -------------------------------------
@@ -231,5 +278,7 @@ usart_writeln:
 s_input:        .db ">> ", 0
 s_cmd_x:        .db "Exit.....", 0
 s_cmd_v:        .db "Console Demo :)", 0x0d, 0x0a, "build %YEAR%%MONTH%%DAY%%HOUR%%MINUTE%", 0
-s_cmd_h:        .db "Help:", 0x0d, 0x0a, " h - this help", 0x0d, 0x0a, " v - program version", 0x0d, 0x0a, " x - exit console", 0
+s_cmd_h_1:      .db "Help:", 0x0d, 0x0a, " h - this help", 0x0d, 0x0a, " v - program version", 0x0d, 0x0a, " x - exit console", 0
+s_cmd_h_2:      .db " l - control leds", 0
 s_cmd_unknown:  .db "Unknown command, enter h for help", 0
+s_cmd_l:        .db "How many leds turn on (0..6)? ", 0

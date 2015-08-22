@@ -5,8 +5,9 @@
 
 .def temp = r16
 .def rx_ready = r17
-.def led = r18
 .def data = r19
+.def data_debug = r20
+.def overflows = r21
 
 .DSEG
 rx_byte:    .byte   1
@@ -14,13 +15,21 @@ rx_byte:    .byte   1
 
 .CSEG
 .ORG 0x0000
-    jmp main ; 1  Reset Vector
+    jmp main                ; 1  Reset Vector
+.ORG 0x0020                 ; memory location of Timer0 overflow handler
+    rjmp overflow_handler   ; go here if a timer0 overflow interrupt occurs 
 .ORG 0x0024
-    jmp usart_rxc_isr ; 19 USART Rx Complete
+    jmp usart_rxc_isr       ; 19 USART Rx Complete
 
-.macro ldidb            ; load .db address into Z register
+
+.macro ldidb                ; load .db address into Z register
 ldi ZL, low(@0 * 2)
 ldi ZH, high(@0 * 2)
+.endmacro
+
+.macro debug                ; send one byte to serial
+mov data_debug, @0
+rcall usart_debug
 .endmacro
 
 main:
@@ -29,8 +38,9 @@ main:
     ldi temp,high(RAMEND)
     out SPH,temp
 
-    rcall led_init
+    rcall display_init
     rcall usart_init
+    rcall counter_init
 
     sei                     ;enable all interrupts
 
@@ -46,11 +56,11 @@ main_loop:
     lds data,rx_byte         ;get the byte
     rcall usart_tx
     rcall usart_nl
+    debug data
 
     ; execute command
     rcall cmd_run
 
-    ;rcall led_debug
     rcall cmd_input
 
     jmp main_loop
@@ -121,73 +131,81 @@ cmd_l_loop:
     rcall usart_tx
     rcall usart_nl
 
-    rcall led_on
+    sbci data, '0'
+    rcall display_show
 
     rjmp cmd_run_end
 
 
-
 ;-----------------------------------------------------------------
-;--------------------- Utils -------------------------------------
+;--------------------- Led ---------------------------------------
 ;-----------------------------------------------------------------
 
-
-led_init:
-    ldi temp, 0b11111100     ; set PD2 - 7 to output
+display_init:
+    ldi temp, 0b11111100     ; set PD2 - PD7 to output
     out DDRD, temp
     ldi temp, 0b00000011     ; set PB0 - PB1 to output
     out DDRB, temp
-    ldi led, 0b00000001
+
+    ser temp;                    ; turn of all segments = 1=off, 0=on
+    out PORTD, temp
+    out PORTB, temp
 
     ret
 
-
-led_debug:
-    push r20
-
-    mov r20, led
-    lsl r20
-    lsl r20
-    out PORTD, r20
-
-    mov r20, led
-    lsr r20
-    lsr r20
-    lsr r20
-    lsr r20
-    lsr r20
-    lsr r20
-    out PORTB, r20
-
-    lsl led
-    brcc PC+2
-    ldi led, 0b00000001
-
-    pop r20
-
+display_show:                   ; display one number stored in data register
+    cpi data, 10
+    brlt display_show_start
+    rcall display_hide
     ret
 
-led_on:
-    clr temp
-    cpi data, '0'
-    breq led_done
+display_show_start:
+    ldidb d_display_1           ; set Z to table
+    clr r0
 
-    cpi data, '7'
-    brsh led_done
+    add ZL, data
+    adc ZH, r0
+    lpm r1, Z                  ; loada number data
+    com r1                     ; invert data - 1=off, 0=on
 
-led_on_loop:
-    dec data
-    sec
-    rol temp
-    cpi data, '0'
-    brne led_on_loop
-
-led_done:
+    mov temp, r1
     lsl temp
     lsl temp
     out PORTD, temp
+
+    sbrs r1, 6
+    cbi PORTB, 0
+
+    sbrc r1, 6
+    sbi PORTB, 0
+
     ret
-    
+
+display_hide:
+    cbi PORTB, 1
+    ser temp
+    out PORTD, temp
+
+display_dot_on:
+    cbi PORTB, 1
+    ret
+
+display_dot_off:
+    sbi PORTB, 1
+    ret
+
+display_dot_toggle:
+    sbic PORTB, 1
+    rjmp display_dot_togle_on
+    rcall display_dot_off
+    rjmp display_dot_toggle_done
+
+display_dot_togle_on:
+    rcall display_dot_on
+
+display_dot_toggle_done:
+    ret
+
 
 ;-----------------------------------------------------------------
 ;--------------------- USART -------------------------------------
@@ -222,6 +240,43 @@ usart_tx:               ; wait for empty buffer and then send data
     rjmp    USART_TX
     sts     UDR0, data
     ret
+
+usart_debug:                ; convert register value to ascii hex and send to UART
+    push data
+    push ZL
+    push ZH
+
+    clr r0                  ; used for adc
+
+    ldi data, '0'           ; send 0x hexa prefix
+    rcall usart_tx
+    ldi data, 'x'
+    rcall usart_tx
+
+    ldidb s_hex             ; get higher nibble asci value
+    mov temp, data_debug
+    andi temp, 0xF0
+    swap temp
+    add ZL, temp
+    adc ZH, r0
+    lpm data, Z
+    rcall usart_tx
+
+    ldidb s_hex             ; get lower nibble asci value
+    mov temp, data_debug
+    andi temp, 0x0F
+    add ZL, temp
+    adc ZH, r0
+    lpm data, Z
+    rcall usart_tx
+
+    rcall usart_nl
+
+    pop ZH
+    pop ZL
+    pop data
+    ret
+
 
 usart_init:
     ldi temp, (1<<RXCIE0) | (1<<RXEN0) | (1<<TXEN0)   ; enable RX Complete interrupt
@@ -269,6 +324,44 @@ usart_writeln:
     ret
 
 
+;-----------------------------------------------------------------
+;--------------------- Countert ----------------------------------
+;-----------------------------------------------------------------
+counter_init:
+    ldi temp,  0b00000101
+    out TCCR0B, temp        ; set the Clock Selector Bits CS00, CS01, CS02 to 101
+                            ; this puts Timer Counter0, TCNT0 in to FCPU/1024 mode
+                            ; so it ticks at the CPU freq/1024
+    ldi temp, 0b00000001
+    sts TIMSK0, temp        ; set the Timer Overflow Interrupt Enable (TOIE0) bit 
+                            ; of the Timer Interrupt Mask Register (TIMSK0)
+
+    clr temp
+    out TCNT0, temp         ; initialize the Timer/Counter to 0
+
+    ret
+
+delay:
+    clr overflows           ; set overflows to 0 
+    sec_count:
+    cpi overflows,10        ; compare number of overflows and 30
+    brne sec_count          ; branch to back to sec_count if not equal 
+    ret                     ; if 30 overflows have occured return to blink
+
+overflow_handler: 
+    in temp, SREG
+    push temp
+
+    inc overflows           ; add 1 to the overflows variable
+    cpi overflows, 20       ; compare with 61
+    brne PC+3               ; Program Counter + 2 (skip next line) if not equal
+    rcall display_dot_toggle
+    clr overflows           ; if 61 overflows occured reset the counter to zero
+
+    pop temp
+    out SREG, temp
+    reti                    ; return from interrupt
+
 
 
 ;-----------------------------------------------------------------
@@ -281,4 +374,7 @@ s_cmd_v:        .db "Console Demo :)", 0x0d, 0x0a, "build %YEAR%%MONTH%%DAY%%HOU
 s_cmd_h_1:      .db "Help:", 0x0d, 0x0a, " h - this help", 0x0d, 0x0a, " v - program version", 0x0d, 0x0a, " x - exit console", 0
 s_cmd_h_2:      .db " l - control leds", 0
 s_cmd_unknown:  .db "Unknown command, enter h for help", 0
-s_cmd_l:        .db "How many leds turn on (0..6)? ", 0
+s_cmd_l:        .db "Enter number? ", 0
+
+d_display_1:    .db 0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111, 0b1111111, 0b1101111
+s_hex:          .db "0123456789abcdef"

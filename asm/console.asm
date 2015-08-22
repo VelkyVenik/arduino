@@ -89,6 +89,9 @@ cmd_run:
     cpi data, 'l'
     breq cmd_l
 
+    cpi data, 'c'
+    breq cmd_c
+
     ;default
     ldidb s_cmd_unknown
     rcall usart_writeln
@@ -133,6 +136,18 @@ cmd_l_loop:
 
     sbci data, '0'
     rcall display_show
+
+    rjmp cmd_run_end
+
+cmd_c:
+    clr data
+
+cmd_c_loop:
+    rcall display_show
+    rcall delay
+    inc data
+    cpi data, 10
+    brlt cmd_c_loop
 
     rjmp cmd_run_end
 
@@ -182,7 +197,7 @@ display_show_start:
     ret
 
 display_hide:
-    cbi PORTB, 1
+    sbi PORTB, 1
     ser temp
     out PORTD, temp
 
@@ -344,10 +359,11 @@ counter_init:
 delay:
     clr overflows           ; set overflows to 0 
     sec_count:
-    cpi overflows,10        ; compare number of overflows and 30
+    cpi overflows,15        ; compare number of overflows and 30
     brne sec_count          ; branch to back to sec_count if not equal 
     ret                     ; if 30 overflows have occured return to blink
 
+; TODO calculate limit values for both functions
 overflow_handler: 
     in temp, SREG
     push temp
@@ -372,7 +388,7 @@ s_input:        .db ">> ", 0
 s_cmd_x:        .db "Exit.....", 0
 s_cmd_v:        .db "Console Demo :)", 0x0d, 0x0a, "build %YEAR%%MONTH%%DAY%%HOUR%%MINUTE%", 0
 s_cmd_h_1:      .db "Help:", 0x0d, 0x0a, " h - this help", 0x0d, 0x0a, " v - program version", 0x0d, 0x0a, " x - exit console", 0
-s_cmd_h_2:      .db " l - control leds", 0
+s_cmd_h_2:      .db " l - control display", 0x0d, 0x0a, " c - count on display", 0
 s_cmd_unknown:  .db "Unknown command, enter h for help", 0
 s_cmd_l:        .db "Enter number? ", 0
 

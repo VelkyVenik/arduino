@@ -5,6 +5,7 @@
 
 .def temp = r16
 .def rx_ready = r17
+.def button = r18
 .def data = r19
 .def data_debug = r20
 .def overflows = r21
@@ -41,16 +42,18 @@ main:
     rcall display_init
     rcall usart_init
     rcall counter_init
+    rcall button_init
 
     sei                     ;enable all interrupts
 
     rcall cmd_input
 
 main_loop:
-    tst rx_ready            ;byte stored?
+    or rx_ready, button         ; data ready or button pressed?
     breq main_loop          ;no (Z=1). Loop
 
     clr rx_ready            ;indicate no more byte
+    clr button
 
     ; load command
     lds data,rx_byte         ;get the byte
@@ -125,12 +128,12 @@ cmd_l:
 
 cmd_l_loop:
     tst rx_ready            ;byte stored?
-    breq cmd_l_loop          ;no (Z=1). Loop
+    breq cmd_l_loop        
 
-    clr rx_ready            ;indicate no more byte
+    clr rx_ready                ;indicate no more byte
 
     ; load and print number
-    lds data,rx_byte         ;get the byte
+    lds data,rx_byte            ;get the byte from UART
     rcall usart_tx
     rcall usart_nl
 
@@ -151,6 +154,14 @@ cmd_c_loop:
 
     rjmp cmd_run_end
 
+;-----------------------------------------------------------------
+;--------------------- Button ------------------------------------
+;-----------------------------------------------------------------
+button_init:
+    sbi PORTB, 3             ; enable pull up resistor for input pin
+    clr button
+    ret
+
 
 ;-----------------------------------------------------------------
 ;--------------------- Led ---------------------------------------
@@ -159,7 +170,7 @@ cmd_c_loop:
 display_init:
     ldi temp, 0b11111100     ; set PD2 - PD7 to output
     out DDRD, temp
-    ldi temp, 0b00000011     ; set PB0 - PB1 to output
+    ldi temp, 0b00000111     ; set PB0 - PB1 to output
     out DDRB, temp
 
     ser temp;                    ; turn of all segments = 1=off, 0=on
@@ -197,26 +208,36 @@ display_show_start:
     ret
 
 display_hide:
-    sbi PORTB, 1
+    sbi PORTB, 0
     ser temp
     out PORTD, temp
 
-display_dot_on:
+display_dot_1_on:
     cbi PORTB, 1
     ret
 
-display_dot_off:
+display_dot_1_off:
     sbi PORTB, 1
+    ret
+
+display_dot_2_on:
+    cbi PORTB, 2
+    ret
+
+display_dot_2_off:
+    sbi PORTB, 2
     ret
 
 display_dot_toggle:
     sbic PORTB, 1
     rjmp display_dot_togle_on
-    rcall display_dot_off
+    rcall display_dot_1_off
+    rcall display_dot_2_on
     rjmp display_dot_toggle_done
 
 display_dot_togle_on:
-    rcall display_dot_on
+    rcall display_dot_1_on
+    rcall display_dot_2_off
 
 display_dot_toggle_done:
     ret
@@ -370,10 +391,11 @@ overflow_handler:
 
     inc overflows           ; add 1 to the overflows variable
     cpi overflows, 20       ; compare with 61
-    brne PC+3               ; Program Counter + 2 (skip next line) if not equal
+    brne overflow_handler_done  ; Program Counter + 2 (skip next line) if not equal
     rcall display_dot_toggle
     clr overflows           ; if 61 overflows occured reset the counter to zero
 
+overflow_handler_done:
     pop temp
     out SREG, temp
     reti                    ; return from interrupt

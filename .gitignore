@@ -1,0 +1,19 @@
+# Claude Code
+.claude/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Arduino
+*.hex
+*.elf
+*.bin
+build/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

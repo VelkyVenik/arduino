@@ -1,3 +1,3 @@
 #!/bin/bash
-
-arduino-cli monitor -p /dev/cu.usbserial-1120 -c baudrate=9600
+DEVICE="${1:-/dev/cu.usbmodem11201}"
+arduino-cli monitor -p "$DEVICE" -c baudrate=9600

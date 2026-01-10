@@ -58,14 +58,15 @@ arduino-cli lib install "TLx493D"
 
 ```bash
 # Monitor serial output (9600 baud is used in these sketches)
-arduino-cli monitor -p /dev/cu.usbserial-1120 -c baudrate=9600
+# Use device from command line or default /dev/cu.usbmodem11201
+arduino-cli monitor -p /dev/cu.usbmodem11201 -c baudrate=9600
 ```
 
 ## Hardware Configuration
 
 - The MagneticSensor project expects TLV493D sensor on I2C: SDA=A4 (pin A4), SCL=A5 (pin A5)
 - Both sketches use Serial at 9600 baud for output
-- Connected board port: /dev/cu.usbserial-1120
+- Default board port: /dev/cu.usbmodem11201
 
 ## Arduino Core
 

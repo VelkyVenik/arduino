@@ -9,18 +9,19 @@ This is an Arduino development workspace containing multiple Arduino sketches. E
 ## Project Structure
 
 - `DetectChip/` - Arduino chip detection utility that identifies the AVR microcontroller, clock speed, SRAM, and flash memory
-- `MagneticSensor/` - 3-axis magnetic field monitor with TLV493D sensor for directional input detection
+- `MagneticSensor/` - USB MIDI controller with TLV493D magnetic sensor and buttons
 
 Each Arduino project follows the standard Arduino IDE structure where the sketch file (`.ino`) must be in a directory with the same name.
 
 ## MagneticSensor Features
 
+- **USB MIDI device** with native USB support (MIDIUSB library)
+- **5 analog inputs** (directions): LEFT, RIGHT, BACK, FORWARD, DOWN → MIDI CC 1-5
+- **2 digital inputs** (buttons): BTN1, BTN2 → MIDI Notes 60, 62 (C4, D4)
+- **5 magnitude levels** (1-5) mapped to CC values 25, 51, 76, 102, 127
 - **Baseline calibration** on startup (hold still)
-- **Direction calibration** for LEFT, RIGHT, BACK, FORWARD, DOWN with EEPROM storage
-- **5 magnitude levels** (1-5) at 20% intervals of calibrated max
-- **Button support** on pins 4 and 5
-- **Serial commands**: C=calibrate, E=show EEPROM, L=toggle log, R=reboot, H=help
-- **Event output**: `EVENT: LEFT 3`, `BTN1`, `BTN2`
+- **Direction calibration** with EEPROM storage
+- **Serial commands**: C=calibrate, E=EEPROM, L=log, M=midi, R=reboot, H=help
 
 ## Development Commands
 
@@ -40,8 +41,8 @@ arduino-cli compile --fqbn arduino:avr:leonardo MagneticSensor/
 # Upload to Arduino Uno
 arduino-cli upload -p /dev/cu.usbserial-1120 --fqbn arduino:avr:uno DetectChip/
 
-# Upload to Arduino Leonardo/Micro
-arduino-cli upload -p /dev/cu.usbmodem11201 --fqbn arduino:avr:leonardo MagneticSensor/
+# Upload to Arduino Leonardo/Micro (MIDI device)
+arduino-cli upload -p /dev/cu.usbmodemMIDI1 --fqbn arduino:avr:leonardo MagneticSensor/
 ```
 
 ### Board Management
@@ -65,10 +66,10 @@ arduino-cli lib install "TLx493D"
 ```bash
 # Use helper script (default port or specify)
 ./monitor.sh
-./monitor.sh /dev/cu.usbmodem11201
+./monitor.sh /dev/cu.usbmodemMIDI1
 
 # Or directly with arduino-cli
-arduino-cli monitor -p /dev/cu.usbmodem11201 -c baudrate=9600
+arduino-cli monitor -p /dev/cu.usbmodemMIDI1 -c baudrate=9600
 ```
 
 ## Hardware Configuration
@@ -78,7 +79,7 @@ arduino-cli monitor -p /dev/cu.usbmodem11201 -c baudrate=9600
 - Button 1: Pin 4 → GND
 - Button 2: Pin 5 → GND
 - Serial: 9600 baud
-- Default port: /dev/cu.usbmodem11201
+- Default port: /dev/cu.usbmodemMIDI1
 
 ## Arduino Core
 

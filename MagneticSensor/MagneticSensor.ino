@@ -1,6 +1,7 @@
 #include "TLx493D_inc.hpp"
 #include <EEPROM.h>
 #include <avr/wdt.h>
+#include <MIDIUSB.h>
 
 using namespace ifx::tlx493d;
 
@@ -29,8 +30,20 @@ const double NOISE_MARGIN = 0.5;
 const int BTN_1 = 4;
 const int BTN_2 = 5;
 
+// MIDI config
+const uint8_t MIDI_CHANNEL = 0;  // Channel 1
+const uint8_t MIDI_CC_LEFT = 1;
+const uint8_t MIDI_CC_RIGHT = 2;
+const uint8_t MIDI_CC_BACK = 3;
+const uint8_t MIDI_CC_FORWARD = 4;
+const uint8_t MIDI_CC_DOWN = 5;
+const uint8_t MIDI_NOTE_BTN1 = 60;  // C4
+const uint8_t MIDI_NOTE_BTN2 = 62;  // D4
+const uint8_t MIDI_VELOCITY = 127;
+
 // State
 bool logEnabled = true;
+bool midiEnabled = true;
 int8_t lastDir = 0;  // 1-5 for directions, 0 for idle
 uint8_t lastMag = 0;
 
@@ -197,6 +210,47 @@ const __FlashStringHelper* dirStr(int8_t d) {
   }
 }
 
+uint8_t dirToCC(int8_t d) {
+  switch (d) {
+    case LEFT: return MIDI_CC_LEFT;
+    case RIGHT: return MIDI_CC_RIGHT;
+    case BACK: return MIDI_CC_BACK;
+    case FORWARD: return MIDI_CC_FORWARD;
+    case DOWN: return MIDI_CC_DOWN;
+    default: return 0;
+  }
+}
+
+uint8_t magToValue(uint8_t mag) {
+  // Map 0-5 to 0-127
+  switch (mag) {
+    case 5: return 127;
+    case 4: return 102;
+    case 3: return 76;
+    case 2: return 51;
+    case 1: return 25;
+    default: return 0;
+  }
+}
+
+void sendMidiCC(uint8_t cc, uint8_t value) {
+  midiEventPacket_t event = {0x0B, 0xB0 | MIDI_CHANNEL, cc, value};
+  MidiUSB.sendMIDI(event);
+  MidiUSB.flush();
+}
+
+void sendMidiNoteOn(uint8_t note) {
+  midiEventPacket_t event = {0x09, 0x90 | MIDI_CHANNEL, note, MIDI_VELOCITY};
+  MidiUSB.sendMIDI(event);
+  MidiUSB.flush();
+}
+
+void sendMidiNoteOff(uint8_t note) {
+  midiEventPacket_t event = {0x08, 0x80 | MIDI_CHANNEL, note, 0};
+  MidiUSB.sendMIDI(event);
+  MidiUSB.flush();
+}
+
 void processEvent(double dX, double dY, double dZ) {
   double absX = abs(dX);
   double absY = abs(dY);
@@ -223,11 +277,23 @@ void processEvent(double dX, double dY, double dZ) {
 
   uint8_t mag = getMagnitude(maxDelta, maxVal);
 
-  // Only print on change
+  // Only act on change
   if (dir != lastDir || mag != lastMag) {
+    // Send MIDI CC
+    if (midiEnabled) {
+      if (dir != IDLE) {
+        sendMidiCC(dirToCC(dir), magToValue(mag));
+      }
+      // Send CC 0 for previous direction if changed
+      if (lastDir != IDLE && lastDir != dir) {
+        sendMidiCC(dirToCC(lastDir), 0);
+      }
+    }
+
     lastDir = dir;
     lastMag = mag;
-    if (mag > 0 && logEnabled) {
+
+    if (logEnabled && mag > 0) {
       Serial.print(F("EVENT: "));
       Serial.print(dirStr(dir));
       Serial.print(F(" "));
@@ -238,24 +304,33 @@ void processEvent(double dX, double dY, double dZ) {
 
 void checkButtons() {
   static bool last1 = HIGH, last2 = HIGH;
-  static unsigned long lastTime = 0;
-
-  if (millis() - lastTime < 200) return;
 
   bool btn1 = digitalRead(BTN_1);
   bool btn2 = digitalRead(BTN_2);
 
-  if (btn1 == LOW && last1 == HIGH) {
-    Serial.println(F("BTN1"));
-    lastTime = millis();
-  }
-  if (btn2 == LOW && last2 == HIGH) {
-    Serial.println(F("BTN2"));
-    lastTime = millis();
+  // Button 1
+  if (btn1 != last1) {
+    if (btn1 == LOW) {
+      if (logEnabled) Serial.println(F("BTN1 ON"));
+      if (midiEnabled) sendMidiNoteOn(MIDI_NOTE_BTN1);
+    } else {
+      if (logEnabled) Serial.println(F("BTN1 OFF"));
+      if (midiEnabled) sendMidiNoteOff(MIDI_NOTE_BTN1);
+    }
+    last1 = btn1;
   }
 
-  last1 = btn1;
-  last2 = btn2;
+  // Button 2
+  if (btn2 != last2) {
+    if (btn2 == LOW) {
+      if (logEnabled) Serial.println(F("BTN2 ON"));
+      if (midiEnabled) sendMidiNoteOn(MIDI_NOTE_BTN2);
+    } else {
+      if (logEnabled) Serial.println(F("BTN2 OFF"));
+      if (midiEnabled) sendMidiNoteOff(MIDI_NOTE_BTN2);
+    }
+    last2 = btn2;
+  }
 }
 
 void checkSerial() {
@@ -272,13 +347,18 @@ void checkSerial() {
       Serial.print(F("Log: "));
       Serial.println(logEnabled ? F("ON") : F("OFF"));
       break;
+    case 'm': case 'M':
+      midiEnabled = !midiEnabled;
+      Serial.print(F("MIDI: "));
+      Serial.println(midiEnabled ? F("ON") : F("OFF"));
+      break;
     case 'r': case 'R':
       Serial.println(F("Rebooting..."));
       delay(100);
       wdt_enable(WDTO_15MS);
       while (1) {}
     case 'h': case 'H': case '?':
-      Serial.println(F("C=calibrate E=EEPROM L=log R=reboot"));
+      Serial.println(F("C=calibrate E=EEPROM L=log M=midi R=reboot"));
       break;
   }
 }
@@ -289,7 +369,7 @@ void setup() {
   pinMode(BTN_1, INPUT_PULLUP);
   pinMode(BTN_2, INPUT_PULLUP);
 
-  Serial.println(F("TLV493D 3-Axis Monitor"));
+  Serial.println(F("TLV493D MIDI Controller"));
 
   if (!sensor.begin()) {
     Serial.println(F("Sensor init failed!"));

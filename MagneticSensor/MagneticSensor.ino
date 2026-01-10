@@ -167,18 +167,22 @@ void showEEPROM() {
 
 uint8_t getMagnitude(double delta, double maxVal) {
   if (maxVal <= NOISE_MARGIN) return 0;
+  if (abs(delta) < NOISE_MARGIN) return 0;
   double ratio = abs(delta) / maxVal;
-  if (ratio >= 0.66) return 3;
-  if (ratio >= 0.33) return 2;
-  if (abs(delta) >= NOISE_MARGIN) return 1;
-  return 0;
+  if (ratio >= 0.80) return 5;
+  if (ratio >= 0.60) return 4;
+  if (ratio >= 0.40) return 3;
+  if (ratio >= 0.20) return 2;
+  return 1;
 }
 
 const __FlashStringHelper* magStr(uint8_t m) {
   switch (m) {
-    case 3: return F("STRONG");
-    case 2: return F("MEDIUM");
-    default: return F("WEAK");
+    case 5: return F("5");
+    case 4: return F("4");
+    case 3: return F("3");
+    case 2: return F("2");
+    default: return F("1");
   }
 }
 

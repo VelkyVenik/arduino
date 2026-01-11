@@ -2,6 +2,7 @@
 #include <EEPROM.h>
 #include <avr/wdt.h>
 #include <MIDIUSB.h>
+#include <LedControl.h>
 
 using namespace ifx::tlx493d;
 
@@ -30,6 +31,12 @@ const double NOISE_MARGIN = 0.5;
 const int BTN_1 = 4;
 const int BTN_2 = 5;
 
+// LED Matrix pins
+const int LED_DIN = 6;
+const int LED_CS = 7;
+const int LED_CLK = 8;
+LedControl lc = LedControl(LED_DIN, LED_CLK, LED_CS, 1);
+
 // MIDI config
 const uint8_t MIDI_CHANNEL = 0;  // Channel 1
 const uint8_t MIDI_CC_LEFT = 1;
@@ -44,6 +51,9 @@ const uint8_t MIDI_VELOCITY = 127;
 // State
 bool logEnabled = true;
 bool midiEnabled = true;
+bool ledEnabled = true;
+bool btn1State = false;  // Toggle state for button 1
+bool btn2State = false;  // Toggle state for button 2
 int8_t lastDir = 0;  // 1-5 for directions, 0 for idle
 uint8_t lastMag = 0;
 
@@ -251,6 +261,97 @@ void sendMidiNoteOff(uint8_t note) {
   MidiUSB.flush();
 }
 
+// LED patterns (8x8 bitmaps)
+const byte PATTERN_LEFT[8] = {
+  B00010000,
+  B00110000,
+  B01111111,
+  B11111111,
+  B01111111,
+  B00110000,
+  B00010000,
+  B00000000
+};
+
+const byte PATTERN_RIGHT[8] = {
+  B00001000,
+  B00001100,
+  B11111110,
+  B11111111,
+  B11111110,
+  B00001100,
+  B00001000,
+  B00000000
+};
+
+const byte PATTERN_FORWARD[8] = {
+  B00011000,
+  B00111100,
+  B01111110,
+  B11111111,
+  B00011000,
+  B00011000,
+  B00011000,
+  B00011000
+};
+
+const byte PATTERN_BACK[8] = {
+  B00011000,
+  B00011000,
+  B00011000,
+  B00011000,
+  B11111111,
+  B01111110,
+  B00111100,
+  B00011000
+};
+
+const byte PATTERN_DOWN[8] = {
+  B00111100,
+  B01111110,
+  B11111111,
+  B11111111,
+  B11111111,
+  B11111111,
+  B01111110,
+  B00111100
+};
+
+const byte PATTERN_IDLE[8] = {
+  B00000000,
+  B00000000,
+  B00011000,
+  B00111100,
+  B00111100,
+  B00011000,
+  B00000000,
+  B00000000
+};
+
+void updateLED(int8_t dir, uint8_t mag) {
+  if (!ledEnabled) return;
+
+  // Set intensity based on magnitude (mag 1-5 -> intensity 3-15)
+  uint8_t intensity = mag > 0 ? 3 + (mag * 2) : 0;
+  lc.setIntensity(0, intensity);
+
+  // Select pattern
+  const byte* pattern;
+  switch (dir) {
+    case LEFT: pattern = PATTERN_LEFT; break;
+    case RIGHT: pattern = PATTERN_RIGHT; break;
+    case FORWARD: pattern = PATTERN_FORWARD; break;
+    case BACK: pattern = PATTERN_BACK; break;
+    case DOWN: pattern = PATTERN_DOWN; break;
+    default: pattern = PATTERN_IDLE; break;
+  }
+
+  // Display pattern
+  for (int row = 0; row < 8; row++) {
+    lc.setRow(0, row, pattern[row]);
+  }
+}
+
 void processEvent(double dX, double dY, double dZ) {
   double absX = abs(dX);
   double absY = abs(dY);
@@ -281,24 +382,54 @@ void processEvent(double dX, double dY, double dZ) {
   if (dir != lastDir || mag != lastMag) {
     // Send MIDI CC
     if (midiEnabled) {
-      if (dir != IDLE) {
-        sendMidiCC(dirToCC(dir), magToValue(mag));
-      }
-      // Send CC 0 for previous direction if changed
-      if (lastDir != IDLE && lastDir != dir) {
+      // When returning to idle, send intermediate values
+      if (dir == IDLE && mag == 0 && lastMag > 0 && lastDir != IDLE) {
+        // Always send intermediate steps when jumping to idle
+        if (lastMag >= 4) {
+          sendMidiCC(dirToCC(lastDir), magToValue(3));
+          MidiUSB.flush();
+        }
+        if (lastMag >= 3) {
+          sendMidiCC(dirToCC(lastDir), magToValue(2));
+          MidiUSB.flush();
+        }
+        if (lastMag >= 2) {
+          sendMidiCC(dirToCC(lastDir), magToValue(1));
+          MidiUSB.flush();
+        }
         sendMidiCC(dirToCC(lastDir), 0);
+      } else {
+        // Normal case
+        if (dir != IDLE) {
+          sendMidiCC(dirToCC(dir), magToValue(mag));
+        }
+        // Send CC 0 for previous direction if changed
+        if (lastDir != IDLE && lastDir != dir) {
+          sendMidiCC(dirToCC(lastDir), 0);
+        }
+      }
+    }
+
+    // Update LED display
+    updateLED(dir, mag);
+
+    // Logging
+    if (logEnabled) {
+      // Show intermediate step when returning to idle
+      if (dir == IDLE && mag == 0 && lastMag > 0 && lastDir != IDLE) {
+        Serial.print(F("EVENT: "));
+        Serial.print(dirStr(lastDir));
+        Serial.println(F(" 1"));
+      } else if (mag > 0) {
+        Serial.print(F("EVENT: "));
+        Serial.print(dirStr(dir));
+        Serial.print(F(" "));
+        Serial.println(magStr(mag));
       }
     }
 
     lastDir = dir;
     lastMag = mag;
-
-    if (logEnabled && mag > 0) {
-      Serial.print(F("EVENT: "));
-      Serial.print(dirStr(dir));
-      Serial.print(F(" "));
-      Serial.println(magStr(mag));
-    }
   }
 }
 
@@ -308,29 +439,31 @@ void checkButtons() {
   bool btn1 = digitalRead(BTN_1);
   bool btn2 = digitalRead(BTN_2);
 
-  // Button 1
-  if (btn1 != last1) {
-    if (btn1 == LOW) {
+  // Button 1 - toggle on press
+  if (btn1 == LOW && last1 == HIGH) {
+    btn1State = !btn1State;
+    if (btn1State) {
       if (logEnabled) Serial.println(F("BTN1 ON"));
       if (midiEnabled) sendMidiNoteOn(MIDI_NOTE_BTN1);
     } else {
       if (logEnabled) Serial.println(F("BTN1 OFF"));
       if (midiEnabled) sendMidiNoteOff(MIDI_NOTE_BTN1);
     }
-    last1 = btn1;
   }
+  last1 = btn1;
 
-  // Button 2
-  if (btn2 != last2) {
-    if (btn2 == LOW) {
+  // Button 2 - toggle on press
+  if (btn2 == LOW && last2 == HIGH) {
+    btn2State = !btn2State;
+    if (btn2State) {
       if (logEnabled) Serial.println(F("BTN2 ON"));
       if (midiEnabled) sendMidiNoteOn(MIDI_NOTE_BTN2);
     } else {
       if (logEnabled) Serial.println(F("BTN2 OFF"));
       if (midiEnabled) sendMidiNoteOff(MIDI_NOTE_BTN2);
     }
-    last2 = btn2;
   }
+  last2 = btn2;
 }
 
 void checkSerial() {
@@ -352,13 +485,19 @@ void checkSerial() {
       Serial.print(F("MIDI: "));
       Serial.println(midiEnabled ? F("ON") : F("OFF"));
       break;
+    case 'd': case 'D':
+      ledEnabled = !ledEnabled;
+      Serial.print(F("LED: "));
+      Serial.println(ledEnabled ? F("ON") : F("OFF"));
+      if (!ledEnabled) lc.clearDisplay(0);
+      break;
     case 'r': case 'R':
       Serial.println(F("Rebooting..."));
       delay(100);
       wdt_enable(WDTO_15MS);
       while (1) {}
     case 'h': case 'H': case '?':
-      Serial.println(F("C=calibrate E=EEPROM L=log M=midi R=reboot"));
+      Serial.println(F("C=calibrate D=display E=EEPROM L=log M=midi R=reboot"));
       break;
   }
 }
@@ -368,6 +507,15 @@ void setup() {
   Serial.begin(9600);
   pinMode(BTN_1, INPUT_PULLUP);
   pinMode(BTN_2, INPUT_PULLUP);
+
+  // Initialize LED matrix
+  lc.shutdown(0, false);
+  lc.setIntensity(0, 8);
+  lc.clearDisplay(0);
+
+  // Initialize buttons to OFF state
+  sendMidiNoteOff(MIDI_NOTE_BTN1);
+  sendMidiNoteOff(MIDI_NOTE_BTN2);
 
   Serial.println(F("TLV493D MIDI Controller"));
 
@@ -424,7 +572,8 @@ void loop() {
     double dZ = (sumZ / count) - idleZ;
 
     double maxDelta = max(max(abs(dX), abs(dY)), dZ < 0 ? abs(dZ) : 0);
-    if (maxDelta >= NOISE_MARGIN) {
+    // Process event if movement detected OR returning to idle from active position
+    if (maxDelta >= NOISE_MARGIN || lastDir != IDLE) {
       processEvent(dX, dY, dZ);
     }
   }

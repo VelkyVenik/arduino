@@ -24,7 +24,7 @@ Each Arduino project follows the standard Arduino IDE structure where the sketch
 - **8x8 LED matrix display** with direction arrows and magnitude-based intensity (brightness 3-15)
 - **Baseline calibration** on startup (hold still)
 - **Direction calibration** with EEPROM storage
-- **Serial commands**: C=calibrate, D=display, E=EEPROM, L=log, M=midi, R=reboot, H=help
+- **Serial commands**: B=brightness, C=calibrate, D=display, E=EEPROM, L=log, M=midi, R=reboot, H=help
 - **Runtime toggles**: Log, MIDI output, and LED display can be enabled/disabled via serial
 
 ## DetectChip Features

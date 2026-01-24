@@ -52,10 +52,13 @@ const uint8_t MIDI_VELOCITY = 127;
 bool logEnabled = true;
 bool midiEnabled = true;
 bool ledEnabled = true;
+uint8_t ledBrightness = 8;  // LED matrix brightness (0-15)
 bool btn1State = false;  // Toggle state for button 1
 bool btn2State = false;  // Toggle state for button 2
-int8_t lastDir = 0;  // 1-5 for directions, 0 for idle
-uint8_t lastMag = 0;
+int8_t lastDir = 0;  // 1-5 for directions, 0 for idle (for display only)
+uint8_t lastMag = 0;  // for display only
+// Track magnitude for each direction independently
+uint8_t dirMag[6] = {0, 0, 0, 0, 0, 0};  // [IDLE, LEFT, RIGHT, BACK, FORWARD, DOWN]
 
 // Direction constants
 enum Dir { IDLE = 0, LEFT = 1, RIGHT = 2, BACK = 3, FORWARD = 4, DOWN = 5 };
@@ -77,13 +80,36 @@ double getAxisDelta(int axis) {
   return count > 0 ? (sum / count) - idle[axis] : 0;
 }
 
-void calibrateDirection(const __FlashStringHelper* name, double* maxVal, int axis, bool negative) {
+// Forward declaration
+const byte* getPatternForDir(int8_t dir);
+
+void calibrateDirection(const __FlashStringHelper* name, double* maxVal, int axis, bool negative, int8_t dirEnum) {
   Serial.print(F("Move to "));
   Serial.print(name);
   Serial.println(F(" max, hold 2s..."));
 
-  // Wait for movement
+  // Show direction arrow animation - pattern will be retrieved later
+  const byte* pattern = NULL;
+
+  // Flash direction arrow while waiting for movement
+  int flashCount = 0;
   while (true) {
+    // Get pattern (done here after patterns are defined)
+    if (pattern == NULL) {
+      pattern = getPatternForDir(dirEnum);
+    }
+
+    // Show arrow (flashing)
+    if (ledEnabled) {
+      if ((flashCount / 5) % 2 == 0) {  // Flash every 0.5s
+        for (int row = 0; row < 8; row++) {
+          lc.setRow(0, row, pattern[row]);
+        }
+      } else {
+        lc.clearDisplay(0);
+      }
+    }
+
     double delta = getAxisDelta(axis);
     if (negative) delta = -delta;
     if (delta > NOISE_MARGIN) {
@@ -91,6 +117,14 @@ void calibrateDirection(const __FlashStringHelper* name, double* maxVal, int axi
       break;
     }
     delay(50);
+    flashCount++;
+  }
+
+  // Keep arrow solid during sampling
+  if (ledEnabled) {
+    for (int row = 0; row < 8; row++) {
+      lc.setRow(0, row, pattern[row]);
+    }
   }
 
   // Sample for 2 seconds
@@ -109,6 +143,26 @@ void calibrateDirection(const __FlashStringHelper* name, double* maxVal, int axi
   Serial.print(F(" max: "));
   Serial.println(peak, 2);
   Serial.println();
+
+  // Show checkmark on success
+  if (ledEnabled) {
+    byte checkmark[8] = {
+      B00000000,
+      B00000001,
+      B00000011,
+      B10000110,
+      B11001100,
+      B01111000,
+      B00110000,
+      B00000000
+    };
+    for (int row = 0; row < 8; row++) {
+      lc.setRow(0, row, checkmark[row]);
+    }
+    delay(500);
+    lc.clearDisplay(0);
+    delay(300);
+  }
 }
 
 void saveToEEPROM() {
@@ -127,12 +181,31 @@ bool loadFromEEPROM() {
 
 void calibrateBaseline() {
   Serial.println(F("Calibrating baseline... hold still"));
-  delay(1000);
+
+  // Spinning animation during calibration
+  byte spinFrames[8][8] = {
+    {B00011000, B00111100, B01111110, B11111111, B00000000, B00000000, B00000000, B00000000},
+    {B00000000, B00011000, B00111100, B01111110, B11111111, B00000000, B00000000, B00000000},
+    {B00000000, B00000000, B00011000, B00111100, B01111110, B11111111, B00000000, B00000000},
+    {B00000000, B00000000, B00000000, B00011000, B00111100, B01111110, B11111111, B00000000},
+    {B00000000, B00000000, B00000000, B00000000, B00011000, B00111100, B01111110, B11111111},
+    {B00000000, B00000000, B00000000, B00000000, B11111111, B01111110, B00111100, B00011000},
+    {B00000000, B00000000, B00000000, B11111111, B01111110, B00111100, B00011000, B00000000},
+    {B00000000, B00000000, B11111111, B01111110, B00111100, B00011000, B00000000, B00000000}
+  };
 
   double sumX = 0, sumY = 0, sumZ = 0;
   int count = 0;
 
   for (int i = 0; i < 20; i++) {
+    // Show animation frame
+    if (ledEnabled) {
+      int frame = i % 8;
+      for (int row = 0; row < 8; row++) {
+        lc.setRow(0, row, spinFrames[frame][row]);
+      }
+    }
+
     double x, y, z;
     if (sensor.getMagneticField(&x, &y, &z)) {
       sumX += x;
@@ -153,19 +226,100 @@ void calibrateBaseline() {
     Serial.print(idleY, 2);
     Serial.print(F(", "));
     Serial.println(idleZ, 2);
+
+    // Show checkmark on success
+    if (ledEnabled) {
+      byte checkmark[8] = {
+        B00000000,
+        B00000001,
+        B00000011,
+        B10000110,
+        B11001100,
+        B01111000,
+        B00110000,
+        B00000000
+      };
+      for (int row = 0; row < 8; row++) {
+        lc.setRow(0, row, checkmark[row]);
+      }
+      delay(800);
+      lc.clearDisplay(0);
+    }
   } else {
     Serial.println(F("Baseline failed!"));
+
+    // Show X on failure
+    if (ledEnabled) {
+      byte crossX[8] = {
+        B10000001,
+        B01000010,
+        B00100100,
+        B00011000,
+        B00011000,
+        B00100100,
+        B01000010,
+        B10000001
+      };
+      for (int row = 0; row < 8; row++) {
+        lc.setRow(0, row, crossX[row]);
+      }
+      delay(800);
+      lc.clearDisplay(0);
+    }
   }
 }
 
 void calibrateDirections() {
   Serial.println(F("\n=== DIRECTION CALIBRATION ==="));
-  calibrateDirection(F("LEFT"), &calib.maxLeft, 0, true);
-  calibrateDirection(F("RIGHT"), &calib.maxRight, 0, false);
-  calibrateDirection(F("BACK"), &calib.maxBack, 1, true);
-  calibrateDirection(F("FORWARD"), &calib.maxForward, 1, false);
-  calibrateDirection(F("DOWN"), &calib.maxDown, 2, true);
+
+  // Show "CAL" text animation
+  if (ledEnabled) {
+    byte calText[8] = {
+      B11111110,
+      B11000000,
+      B11000000,
+      B11000000,
+      B11000000,
+      B11000000,
+      B11111110,
+      B00000000
+    };
+    for (int flash = 0; flash < 4; flash++) {
+      for (int row = 0; row < 8; row++) {
+        lc.setRow(0, row, calText[row]);
+      }
+      delay(200);
+      lc.clearDisplay(0);
+      delay(200);
+    }
+  }
+
+  calibrateDirection(F("LEFT"), &calib.maxLeft, 0, true, LEFT);
+  calibrateDirection(F("RIGHT"), &calib.maxRight, 0, false, RIGHT);
+  calibrateDirection(F("BACK"), &calib.maxBack, 1, true, BACK);
+  calibrateDirection(F("FORWARD"), &calib.maxForward, 1, false, FORWARD);
+  calibrateDirection(F("DOWN"), &calib.maxDown, 2, true, DOWN);
   saveToEEPROM();
+
+  // Show "OK" on complete
+  if (ledEnabled) {
+    byte okText[8] = {
+      B01111110,
+      B11000011,
+      B11000011,
+      B11000011,
+      B11000011,
+      B11000011,
+      B01111110,
+      B00000000
+    };
+    for (int row = 0; row < 8; row++) {
+      lc.setRow(0, row, okText[row]);
+    }
+    delay(1000);
+    lc.clearDisplay(0);
+  }
+
   Serial.println(F("=== COMPLETE ==="));
 }
 
@@ -229,7 +383,7 @@ uint8_t magToValue(uint8_t mag) {
 void sendMidiCC(uint8_t cc, uint8_t value) {
   midiEventPacket_t event = {0x0B, 0xB0 | MIDI_CHANNEL, cc, value};
   MidiUSB.sendMIDI(event);
-  MidiUSB.flush();
+  // Don't flush here - will flush after all messages sent
 }
 
 void sendMidiNoteOn(uint8_t note) {
@@ -311,11 +465,22 @@ const byte PATTERN_IDLE[8] = {
   B00111100
 };
 
+const byte* getPatternForDir(int8_t dir) {
+  switch (dir) {
+    case LEFT: return PATTERN_LEFT;
+    case RIGHT: return PATTERN_RIGHT;
+    case FORWARD: return PATTERN_FORWARD;
+    case BACK: return PATTERN_BACK;
+    case DOWN: return PATTERN_DOWN;
+    default: return PATTERN_IDLE;
+  }
+}
+
 void updateLED(int8_t dir, uint8_t mag) {
   if (!ledEnabled) return;
 
-  // Set intensity based on magnitude (mag 1-5 -> intensity 3-15)
-  uint8_t intensity = mag > 0 ? 3 + (mag * 2) : 8;
+  // Set intensity: idle uses ledBrightness, active uses magnitude-based
+  uint8_t intensity = (dir == IDLE) ? 3 : ledBrightness;
   lc.setIntensity(0, intensity);
 
   // Select pattern
@@ -357,74 +522,88 @@ void updateLED(int8_t dir, uint8_t mag) {
   }
 }
 
+void sendAllMidiState() {
+  if (!midiEnabled) return;
+
+  // Send all 5 direction CC values as a burst
+  sendMidiCC(MIDI_CC_LEFT, magToValue(dirMag[LEFT]));
+  sendMidiCC(MIDI_CC_RIGHT, magToValue(dirMag[RIGHT]));
+  sendMidiCC(MIDI_CC_BACK, magToValue(dirMag[BACK]));
+  sendMidiCC(MIDI_CC_FORWARD, magToValue(dirMag[FORWARD]));
+  sendMidiCC(MIDI_CC_DOWN, magToValue(dirMag[DOWN]));
+
+  // Send button states as notes
+  if (btn1State) {
+    midiEventPacket_t noteOn = {0x09, 0x90 | MIDI_CHANNEL, MIDI_NOTE_BTN1, MIDI_VELOCITY};
+    MidiUSB.sendMIDI(noteOn);
+  } else {
+    midiEventPacket_t noteOff = {0x08, 0x80 | MIDI_CHANNEL, MIDI_NOTE_BTN1, 0};
+    MidiUSB.sendMIDI(noteOff);
+  }
+
+  if (btn2State) {
+    midiEventPacket_t noteOn = {0x09, 0x90 | MIDI_CHANNEL, MIDI_NOTE_BTN2, MIDI_VELOCITY};
+    MidiUSB.sendMIDI(noteOn);
+  } else {
+    midiEventPacket_t noteOff = {0x08, 0x80 | MIDI_CHANNEL, MIDI_NOTE_BTN2, 0};
+    MidiUSB.sendMIDI(noteOff);
+  }
+
+  // Flush all messages at once
+  MidiUSB.flush();
+}
+
 void processEvent(double dX, double dY, double dZ) {
   double absX = abs(dX);
   double absY = abs(dY);
   double absZ = dZ < 0 ? abs(dZ) : 0;  // Only DOWN
 
-  // Find dominant direction
-  int8_t dir = IDLE;
-  double maxDelta = 0;
-  double maxVal = 0;
+  // Calculate magnitude for each direction independently
+  uint8_t newMag[6];
+  newMag[IDLE] = 0;
+  newMag[LEFT] = (dX < 0) ? getMagnitude(absX, calib.maxLeft) : 0;
+  newMag[RIGHT] = (dX > 0) ? getMagnitude(absX, calib.maxRight) : 0;
+  newMag[BACK] = (dY < 0) ? getMagnitude(absY, calib.maxBack) : 0;
+  newMag[FORWARD] = (dY > 0) ? getMagnitude(absY, calib.maxForward) : 0;
+  newMag[DOWN] = getMagnitude(absZ, calib.maxDown);
 
-  if (absX >= absY && absX >= absZ && absX > NOISE_MARGIN) {
-    dir = dX > 0 ? RIGHT : LEFT;
-    maxDelta = absX;
-    maxVal = dX > 0 ? calib.maxRight : calib.maxLeft;
-  } else if (absY >= absX && absY >= absZ && absY > NOISE_MARGIN) {
-    dir = dY > 0 ? FORWARD : BACK;
-    maxDelta = absY;
-    maxVal = dY > 0 ? calib.maxForward : calib.maxBack;
-  } else if (absZ > NOISE_MARGIN) {
-    dir = DOWN;
-    maxDelta = absZ;
-    maxVal = calib.maxDown;
+  // Check if anything changed
+  bool changed = false;
+  int8_t dominantDir = IDLE;
+  uint8_t dominantMag = 0;
+
+  for (int8_t d = LEFT; d <= DOWN; d++) {
+    if (newMag[d] != dirMag[d]) {
+      changed = true;
+
+      // Logging
+      if (logEnabled && (newMag[d] > 0 || dirMag[d] > 0)) {
+        Serial.print(F("EVENT: "));
+        Serial.print(dirStr(d));
+        Serial.print(F(" "));
+        Serial.println(newMag[d]);
+      }
+
+      dirMag[d] = newMag[d];
+    }
+
+    // Track dominant direction for display
+    if (newMag[d] > dominantMag) {
+      dominantMag = newMag[d];
+      dominantDir = d;
+    }
   }
 
-  uint8_t mag = getMagnitude(maxDelta, maxVal);
+  // If anything changed, send complete MIDI state as burst
+  if (changed) {
+    sendAllMidiState();
 
-  // Only act on change
-  if (dir != lastDir || mag != lastMag) {
-    // Send MIDI CC
-    if (midiEnabled) {
-      bool returningToIdle = (dir == IDLE && mag == 0 && lastMag > 0 && lastDir != IDLE);
-      if (returningToIdle) {
-        // Send intermediate steps when jumping to idle for smooth release
-        uint8_t cc = dirToCC(lastDir);
-        for (int8_t m = lastMag - 1; m >= 1; m--) {
-          sendMidiCC(cc, magToValue(m));
-        }
-        sendMidiCC(cc, 0);
-      } else {
-        if (dir != IDLE) {
-          sendMidiCC(dirToCC(dir), magToValue(mag));
-        }
-        if (lastDir != IDLE && lastDir != dir) {
-          sendMidiCC(dirToCC(lastDir), 0);
-        }
-      }
+    // Update LED display with dominant direction
+    if (dominantDir != lastDir || dominantMag != lastMag) {
+      updateLED(dominantDir, dominantMag);
+      lastDir = dominantDir;
+      lastMag = dominantMag;
     }
-
-    // Update LED display
-    updateLED(dir, mag);
-
-    // Logging
-    if (logEnabled) {
-      // Show intermediate step when returning to idle
-      if (dir == IDLE && mag == 0 && lastMag > 0 && lastDir != IDLE) {
-        Serial.print(F("EVENT: "));
-        Serial.print(dirStr(lastDir));
-        Serial.println(F(" 1"));
-      } else if (mag > 0) {
-        Serial.print(F("EVENT: "));
-        Serial.print(dirStr(dir));
-        Serial.print(F(" "));
-        Serial.println(mag);
-      }
-    }
-
-    lastDir = dir;
-    lastMag = mag;
   }
 }
 
@@ -434,20 +613,81 @@ void handleButtonToggle(bool& state, uint8_t note, const __FlashStringHelper* na
     Serial.print(name);
     Serial.println(state ? F(" ON") : F(" OFF"));
   }
-  if (midiEnabled) {
-    if (state) sendMidiNoteOn(note);
-    else sendMidiNoteOff(note);
-  }
+  // Send complete MIDI state as burst (includes button states)
+  sendAllMidiState();
   updateLED(lastDir, lastMag);
 }
 
 void checkButtons() {
   static bool last1 = HIGH, last2 = HIGH;
+  static unsigned long bothPressedStart = 0;
+  static bool calibTriggered = false;
+
   bool btn1 = digitalRead(BTN_1);
   bool btn2 = digitalRead(BTN_2);
 
-  if (btn1 == LOW && last1 == HIGH) handleButtonToggle(btn1State, MIDI_NOTE_BTN1, F("BTN1"));
-  if (btn2 == LOW && last2 == HIGH) handleButtonToggle(btn2State, MIDI_NOTE_BTN2, F("BTN2"));
+  // Check if both buttons pressed
+  if (btn1 == LOW && btn2 == LOW) {
+    if (bothPressedStart == 0) {
+      bothPressedStart = millis();
+      calibTriggered = false;
+    }
+
+    // Check if held for 5 seconds
+    unsigned long holdTime = millis() - bothPressedStart;
+    if (holdTime >= 5000 && !calibTriggered) {
+      Serial.println(F("Both buttons held - starting calibration!"));
+
+      // Show progress animation during hold
+      if (ledEnabled && holdTime < 5500) {
+        byte progressBar[8] = {
+          B11111111,
+          B11111111,
+          B00000000,
+          B00000000,
+          B00000000,
+          B00000000,
+          B11111111,
+          B11111111
+        };
+        for (int row = 0; row < 8; row++) {
+          lc.setRow(0, row, progressBar[row]);
+        }
+      }
+
+      calibTriggered = true;
+      calibrateBaseline();
+      calibrateDirections();
+
+      // Return to idle display
+      updateLED(IDLE, 0);
+    }
+  } else {
+    // Buttons released
+    if (bothPressedStart > 0 && !calibTriggered) {
+      // Released before 5 seconds - process as normal button presses
+      if (btn1 == HIGH && last1 == LOW && btn2 == LOW) {
+        // BTN1 released first
+        handleButtonToggle(btn1State, MIDI_NOTE_BTN1, F("BTN1"));
+      }
+      if (btn2 == HIGH && last2 == LOW && btn1 == LOW) {
+        // BTN2 released first
+        handleButtonToggle(btn2State, MIDI_NOTE_BTN2, F("BTN2"));
+      }
+    }
+    bothPressedStart = 0;
+    calibTriggered = false;
+
+    // Normal single button press detection
+    if (!calibTriggered) {
+      if (btn1 == LOW && last1 == HIGH && btn2 == HIGH) {
+        handleButtonToggle(btn1State, MIDI_NOTE_BTN1, F("BTN1"));
+      }
+      if (btn2 == LOW && last2 == HIGH && btn1 == HIGH) {
+        handleButtonToggle(btn2State, MIDI_NOTE_BTN2, F("BTN2"));
+      }
+    }
+  }
 
   last1 = btn1;
   last2 = btn2;
@@ -478,13 +718,19 @@ void checkSerial() {
       Serial.println(ledEnabled ? F("ON") : F("OFF"));
       if (!ledEnabled) lc.clearDisplay(0);
       break;
+    case 'b': case 'B':
+      ledBrightness = (ledBrightness + 3) % 16;  // Cycle: 0, 3, 6, 9, 12, 15, 0...
+      Serial.print(F("Brightness: "));
+      Serial.println(ledBrightness);
+      updateLED(lastDir, lastMag);  // Update display with new brightness
+      break;
     case 'r': case 'R':
       Serial.println(F("Rebooting..."));
       delay(100);
       wdt_enable(WDTO_15MS);
       while (1) {}
     case 'h': case 'H': case '?':
-      Serial.println(F("C=calibrate D=display E=EEPROM L=log M=midi R=reboot"));
+      Serial.println(F("B=brightness C=calibrate D=display E=EEPROM L=log M=midi R=reboot"));
       break;
   }
 }
@@ -503,18 +749,24 @@ void setup() {
   lc.setIntensity(0, 8);
   lc.clearDisplay(0);
 
-  // Test pattern - all LEDs on
-  Serial.println(F("LED test: all ON"));
+  // Test pattern - show letter "L" to check orientation
+  Serial.println(F("LED test: showing 'L' pattern"));
+  byte testL[8] = {
+    B10000000,
+    B10000000,
+    B10000000,
+    B10000000,
+    B10000000,
+    B10000000,
+    B11111111,
+    B00000000
+  };
   for (int row = 0; row < 8; row++) {
-    lc.setRow(0, row, B11111111);
+    lc.setRow(0, row, testL[row]);
   }
-  delay(1000);
+  delay(3000);  // Show for 3 seconds
   lc.clearDisplay(0);
   Serial.println(F("LED test: cleared"));
-
-  // Initialize buttons to OFF state
-  sendMidiNoteOff(MIDI_NOTE_BTN1);
-  sendMidiNoteOff(MIDI_NOTE_BTN2);
 
   if (!sensor.begin()) {
     Serial.println(F("Sensor init failed!"));
@@ -535,6 +787,9 @@ void setup() {
   // Show idle pattern (smiley)
   Serial.println(F("Showing idle pattern"));
   updateLED(IDLE, 5);
+
+  // Send initial MIDI state (all zeros + button states)
+  sendAllMidiState();
 }
 
 void loop() {

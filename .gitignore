@@ -17,3 +17,4 @@ build/
 # IDE
 .vscode/
 .idea/
+test_display_pins/

@@ -294,10 +294,10 @@ void calibrateDirections() {
     }
   }
 
-  calibrateDirection(F("LEFT"), &calib.maxLeft, 0, true, LEFT);
-  calibrateDirection(F("RIGHT"), &calib.maxRight, 0, false, RIGHT);
-  calibrateDirection(F("BACK"), &calib.maxBack, 1, true, BACK);
-  calibrateDirection(F("FORWARD"), &calib.maxForward, 1, false, FORWARD);
+  calibrateDirection(F("LEFT"), &calib.maxLeft, 0, false, LEFT);
+  calibrateDirection(F("RIGHT"), &calib.maxRight, 0, true, RIGHT);
+  calibrateDirection(F("BACK"), &calib.maxBack, 1, false, BACK);
+  calibrateDirection(F("FORWARD"), &calib.maxForward, 1, true, FORWARD);
   calibrateDirection(F("DOWN"), &calib.maxDown, 2, true, DOWN);
   saveToEEPROM();
 
@@ -561,10 +561,10 @@ void processEvent(double dX, double dY, double dZ) {
   // Calculate magnitude for each direction independently
   uint8_t newMag[6];
   newMag[IDLE] = 0;
-  newMag[LEFT] = (dX < 0) ? getMagnitude(absX, calib.maxLeft) : 0;
-  newMag[RIGHT] = (dX > 0) ? getMagnitude(absX, calib.maxRight) : 0;
-  newMag[BACK] = (dY < 0) ? getMagnitude(absY, calib.maxBack) : 0;
-  newMag[FORWARD] = (dY > 0) ? getMagnitude(absY, calib.maxForward) : 0;
+  newMag[LEFT] = (dX > 0) ? getMagnitude(absX, calib.maxLeft) : 0;
+  newMag[RIGHT] = (dX < 0) ? getMagnitude(absX, calib.maxRight) : 0;
+  newMag[BACK] = (dY > 0) ? getMagnitude(absY, calib.maxBack) : 0;
+  newMag[FORWARD] = (dY < 0) ? getMagnitude(absY, calib.maxForward) : 0;
   newMag[DOWN] = getMagnitude(absZ, calib.maxDown);
 
   // Check if anything changed

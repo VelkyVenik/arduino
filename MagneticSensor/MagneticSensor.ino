@@ -479,9 +479,9 @@ const byte* getPatternForDir(int8_t dir) {
 void updateLED(int8_t dir, uint8_t mag) {
   if (!ledEnabled) return;
 
-  // Set intensity: idle uses ledBrightness, active uses magnitude-based
-  uint8_t intensity = (dir == IDLE) ? 3 : ledBrightness;
-  lc.setIntensity(0, intensity);
+  // Use brightness 0 for IDLE, ledBrightness for direction modes
+  uint8_t brightness = (dir == IDLE) ? 0 : ledBrightness;
+  lc.setIntensity(0, brightness);
 
   // Select pattern
   const byte* pattern;
@@ -722,7 +722,28 @@ void checkSerial() {
       ledBrightness = (ledBrightness + 3) % 16;  // Cycle: 0, 3, 6, 9, 12, 15, 0...
       Serial.print(F("Brightness: "));
       Serial.println(ledBrightness);
-      updateLED(lastDir, lastMag);  // Update display with new brightness
+
+      // Show brightness preview pattern
+      if (ledEnabled) {
+        lc.setIntensity(0, ledBrightness);
+        // Show a brightness preview pattern - vertical bar with horizontal line
+        byte brightnessPattern[8] = {
+          B00011000,
+          B00011000,
+          B00011000,
+          B11111111,
+          B00011000,
+          B00011000,
+          B00011000,
+          B00000000
+        };
+        for (int row = 0; row < 8; row++) {
+          lc.setRow(0, row, brightnessPattern[row]);
+        }
+        delay(1000);  // Show preview for 1 second
+      }
+
+      updateLED(lastDir, lastMag);  // Return to normal display
       break;
     case 'r': case 'R':
       Serial.println(F("Rebooting..."));
@@ -749,25 +770,6 @@ void setup() {
   lc.setIntensity(0, 8);
   lc.clearDisplay(0);
 
-  // Test pattern - show letter "L" to check orientation
-  Serial.println(F("LED test: showing 'L' pattern"));
-  byte testL[8] = {
-    B10000000,
-    B10000000,
-    B10000000,
-    B10000000,
-    B10000000,
-    B10000000,
-    B11111111,
-    B00000000
-  };
-  for (int row = 0; row < 8; row++) {
-    lc.setRow(0, row, testL[row]);
-  }
-  delay(3000);  // Show for 3 seconds
-  lc.clearDisplay(0);
-  Serial.println(F("LED test: cleared"));
-
   if (!sensor.begin()) {
     Serial.println(F("Sensor init failed!"));
     while (1) delay(1000);
@@ -784,9 +786,8 @@ void setup() {
     Serial.println(F("Ready!"));
   }
 
-  // Show idle pattern (smiley)
-  Serial.println(F("Showing idle pattern"));
-  updateLED(IDLE, 5);
+  // Show idle pattern
+  updateLED(IDLE, 0);
 
   // Send initial MIDI state (all zeros + button states)
   sendAllMidiState();
